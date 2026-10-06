@@ -1,0 +1,68 @@
+/*-- scss:defaults --*/
+$body-bg: #ffffff;
+$body-color: #1f2328;
+$link-color: #0b5cad;
+$presentation-heading-color: #12355b;
+$presentation-font-size-root: 36px;
+$presentation-heading-font-weight: 600;
+$code-block-font-size: 0.75em;
+
+/*-- scss:rules --*/
+.reveal h1, .reveal h2 { letter-spacing: -0.01em; }
+.reveal .slide-title-sub { color: #57606a; font-size: 0.7em; }
+
+// One-line takeaway at the bottom of a slide
+.takeaway {
+  border-left: 5px solid #d4731c;
+  background: #fdf3e9;
+  padding: 0.35em 0.7em;
+  margin-top: 0.6em;
+  font-size: 0.85em;
+}
+
+// Marketing analogy box
+.analogy {
+  border-left: 5px solid #2a7a4b;
+  background: #edf7f0;
+  padding: 0.35em 0.7em;
+  margin-top: 0.5em;
+  font-size: 0.8em;
+}
+
+.muted { color: #6e7781; }
+.small { font-size: 0.75em; }
+
+.reveal table { font-size: 0.9em; }
+.reveal table th { background: #eef2f6; }
+.reveal table td, .reveal table th { padding: 0.25em 0.6em; }
+
+.reveal .callout { font-size: 0.85em; }
+
+// Left-to-right pipeline diagram built from spans
+.flow { font-size: 0.8em; margin: 0.4em 0 0.6em; }
+.flow > p {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  margin: 0;
+}
+.flow .box {
+  border: 2px solid #12355b;
+  border-radius: 6px;
+  background: #eef2f6;
+  padding: 0.3em 0.6em;
+  text-align: center;
+  line-height: 1.25;
+}
+.flow .box.plain { background: #ffffff; border-style: dashed; }
+.flow .arrow { color: #12355b; font-size: 1.3em; }
+
+// Discussion question from the week 4 handout
+.discussion {
+  border-left: 5px solid #6b4fa0;
+  background: #f3effa;
+  padding: 0.3em 0.7em;
+  margin-top: 0.5em;
+  font-size: 0.8em;
+}
