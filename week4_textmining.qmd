@@ -1,0 +1,806 @@
+---
+title: "Text Mining in Marketing"
+subtitle: "Week 4: the models behind the notebook"
+author: "Daniel Winkler"
+institute: "UNSW Business School"
+format:
+  revealjs:
+    theme: [default, custom.scss]
+    slide-number: c/t
+    width: 1280
+    height: 760
+    margin: 0.06
+    embed-resources: true
+    html-math-method: katex
+    hash-type: number
+    transition: none
+    navigation-mode: linear
+    preview-links: false
+    code-line-numbers: false
+---
+
+## One question for the whole session {.smaller}
+
+**Is this answer warm toward the person who asked?**
+
+- 100 Reddit "Ask Me Anything" (AMA) answers by business leaders
+- 50 *development* answers carry human ratings of external warmth (1 to 5, average of two raters)
+- *High warmth* = average of 4 or more: **9 of 50** answers
+- The other 50 *evaluation* answers have hidden labels
+- The label is noisy too: the two raters of an answer sometimes disagree by 3 points
+
+We will use these methods to measure warmth or inspect the texts behind the measure.
+
+::: takeaway
+For every model, two questions: **what does it do** to the text, and **where does it go wrong**? Treat each one as a measurement instrument and check it against human judgment.
+:::
+
+::: notes
+Anchor everything on the warmth task. Each section ends with how the method did on it, or why it cannot be used for it.
+:::
+
+## The map {.smaller}
+
+| Family | Representation of a text | Where the knowledge comes from | Output |
+|---|---|---|---|
+| Rules, lexicons (spaCy rules, WordNet, VADER) | tokens + tags | experts who wrote rules or word lists | flags, counts, scores |
+| Bag of words + logistic regression | word counts | **your** labeled examples | class probability |
+| Topic model (LDA) | word counts | patterns in the corpus itself | topic shares |
+| Fine-tuned transformer (DistilBERT) | contextual vectors | pretraining + **someone else's** labels | label + confidence |
+| Sentence embeddings (MiniLM) | one dense vector | pretraining on similar-sentence pairs | coordinates |
+| Zero-shot NLI | sentence pair | pretraining + inference datasets | label ranking |
+| Generative language models (Falcon, T5) | token sequence | next-token prediction on web text | new text, token probabilities |
+| CLIP | image and text vectors | 400M image–caption pairs | similarity |
+
+::: notes
+Two axes matter: what the text becomes (counts, vectors) and who supplied the knowledge (you, an expert, someone else's labels, the internet). The more the knowledge comes from someone else, the less you control what is measured.
+:::
+
+## Discussion questions: text mining in general {.smaller}
+
+Questions from the week 4 handout and where we address them:
+
+| Question | Where |
+|---|---|
+| Based on Hartmann & Netzer (2023, Table 1): which NLP methods and analyses are well established in marketing, and which are emerging? | The map |
+| Your own marketing research question that benefits from text mining: what would you measure, and how? Did LLMs make it possible? | Throughout |
+| Tokenization vs. lemmatization vs. stemming (Berger et al. 2020, Table 2) | Part 1, notebook §2 |
+| What are stop words, and why remove them? | Part 1, §2 |
+| Two pitfalls of dictionary-based approaches | Parts 1–2, §3 and §4 |
+| What is an n-gram, and why might it be useful? | Part 3, §5 |
+
+<span class="small muted">Topic-model questions: Part 4. LLM questions: Part 7.</span>
+
+# Part 1: From text to units
+
+## Tokens, lemmas, stems {.smaller}
+
+:::: {.columns}
+::: {.column width="50%"}
+| surface | lemma (spaCy) | Porter stem |
+|---|---|---|
+| studies | study | studi |
+| mice | mouse | mice |
+| running | run | run |
+| better | well | better |
+| Universe | Universe | univers |
+| University | University | univers |
+:::
+::: {.column width="50%"}
+- **Token**: a unit the tokenizer cuts out (word, punctuation, number)
+- **Lemma**: dictionary form; uses the part of speech (*better* → *well*, *mice* → *mouse*)
+- **Stem**: the result of cutting suffixes by fixed rules (Porter 1980), without a dictionary; can produce non-words (*studi*) and false merges (*Universe* = *University*)
+- **Stop words**: frequent function words (*the, is, that*) a content analysis usually drops
+:::
+::::
+
+::: takeaway
+Stemming can merge different words; lemmas are easier to read. Report which representation you use in the document-term matrix.
+:::
+
+::: discussion
+**Discussion.** In your own words: how do tokenization, lemmatization, and stemming differ? What are stop words, and why remove them?
+:::
+
+<span class="small muted">Notebook: §2</span>
+
+## spaCy: a pipeline of small statistical models {.smaller}
+
+::: flow
+[raw text]{.box .plain} [→]{.arrow} [tokenizer<br>rules]{.box} [→]{.arrow} [tagger<br>part of speech]{.box} [→]{.arrow} [dependency<br>parser]{.box} [→]{.arrow} [entity<br>recognizer]{.box} [→]{.arrow} [annotated<br>document]{.box .plain}
+:::
+
+- Each step except the tokenizer is a **classifier**: for every token, predict a tag from the surrounding tokens
+- Trained on hand-annotated news and web text; typos and informal answers can cause errors
+
+| Input | Entities found |
+|---|---|
+| I love UNSW | UNSW → organization |
+| Canberra is the capital of Australia | Canberra, Australia → places |
+| Canbe**r**a is the capital of Australia | only Australia |
+| *brown, wheat based\-\-\- spirits.* (an AMA answer) | brown → **person** |
+
+::: takeaway
+Named entity recognition (NER) can miss names and mislabel ordinary words. Read the extracted entities alongside the text.
+:::
+
+<span class="small muted">Notebook: §3</span>
+
+## Rules on top of tags {.smaller}
+
+**Phrase rules** match strings; **token rules** match tag patterns.
+
+```text
+ADJ_NOUN : adjective + noun                       "loyal customers", "fair price"
+X_IS_Y   : noun + "be" + (det) + (adj)* + noun/adj  "service is slow"
+```
+
+On the 100 AMA answers: 269 ADJ_NOUN hits, 23 X_IS_Y hits.
+
+- Top ADJ_NOUN pairs make sense: *private loan* (5), *federal loan* (4)
+- X_IS_Y yields oddities such as *outernet → broadcast*: tagging errors on informal text can produce false matches
+
+**Dependency parse → subject–verb–object triples**
+
+*Our customers love the new product* → (customer, love, product)
+
+- 227 triples from 74 answers; 3 in 4 subjects are pronouns (*we take approach*)
+
+::: takeaway
+Rules are transparent and cheap. Their matches still depend on the tags being correct.
+:::
+
+<span class="small muted">Optional extension · Notebook: optional 3c; appendix B</span>
+
+# Part 2: Counting
+
+## Co-occurrence and lift {.smaller}
+
+Two words are related if they appear in the same document more often than chance predicts.
+
+$$
+\text{lift}(a,b) = \frac{P(a \text{ and } b)}{P(a)\,P(b)}
+\qquad 1 = \text{independent},\; >1 = \text{travel together}
+$$
+
+- Raw counts favor frequent words: the top AMA pair by count is *need – work* (9 answers)
+- Lift adjusts for word frequency: *money – cost* share 4 answers, lift 9.5
+- Toy example: *discount – purchase* lift 2.5
+- Without a minimum count, a pair seen together once (*dump – steal*) gets lift 100
+
+::: analogy
+**Marketing use:** Netzer et al. (2012) build brand maps from forum posts this way: brands mentioned together more than chance predicts sit close together, like a perceptual map built from conversation instead of a survey.
+:::
+
+::: takeaway
+Lift is unstable for rare words: with 100 short documents, require a minimum number of shared documents (the notebook uses 3 to 5).
+:::
+
+<span class="small muted">Optional extension · Notebook: optional 3b</span>
+
+## WordNet: a hand-built map of word senses {.smaller}
+
+- Words are grouped into **synsets** (sets of synonyms for one sense)
+- Synsets are linked by "is a kind of" relations (hypernyms)
+
+| word | most common sense | chain upward |
+|---|---|---|
+| customer | someone who pays for goods or services | customer > consumer > user > person |
+| client | a person who seeks the advice of a lawyer | client > case > person |
+| price | monetary value | monetary_value > value > worth > quality |
+
+- *price* pooled over senses includes the soprano Leontyne Price
+- Path similarity: *price–cost* 0.09, the same as *loan–coffee* 0.09
+
+**Use:** expand a seed word list. *customer* appears in 2 AMA answers; *customer* or *client* in 3.
+
+::: takeaway
+Good for dictionary expansion with a human check; weak as a similarity measure.
+:::
+
+<span class="small muted">Optional extension · Notebook: appendix A</span>
+
+## VADER: a lexicon with grammar rules {.smaller}
+
+:::: {.columns}
+::: {.column width="52%"}
+1. Every word in a hand-rated list has a valence (*good* positive, *bad* negative)
+2. Rules adjust: negation flips, *very* boosts, CAPS and "!" amplify
+3. Sum and squash into $[-1, 1]$:
+$$\text{compound} = \frac{x}{\sqrt{x^2 + 15}}$$
+:::
+::: {.column width="48%"}
+| text | compound |
+|---|---|
+| The product is good. | 0.44 |
+| The product is not good. | −0.34 |
+| I am so happy! | 0.72 |
+| I am so hapy! | 0.00 |
+| Oh great, another price increase. Just what I wanted. | **0.75** |
+:::
+::::
+
+- Typos fall outside the lexicon; sarcasm reads as praise
+- This notebook uses ±0.5; VADER documents ±0.05 as typical cutoffs
+
+::: takeaway
+VADER is fast and transparent and needs no training data. It measures the valence of words, which is not warmth toward a person.
+:::
+
+::: discussion
+**Discussion.** Name two pitfalls of dictionary-based approaches (this slide and the spaCy slides, notebook §3–4).
+:::
+
+<span class="small muted">Hutto & Gilbert (2014) · [VADER cutoffs](https://github.com/cjhutto/vaderSentiment#about-the-scoring) · Notebook: §4</span>
+
+# Part 3: Supervised learning on word counts
+
+## The document-term matrix {.smaller}
+
+::: {.fragment}
+| | thank | appreciate | negotiated | audit | ... |
+|---|---|---|---|---|---|
+| Thank you, we appreciate your support. | 1 | 1 | 0 | 0 | |
+| The audit covers four quarters of data. | 0 | 0 | 0 | 1 | |
+| We negotiated all night. | 0 | 0 | 1 | 0 | |
+:::
+
+::: {.fragment}
+- One row per document, one column per word (or stem, or n-gram)
+- Word order is gone: this is the **bag of words**
+- Choices: lowercase? stems? word pairs and triples (n-grams)? minimum frequency?
+- With 1- and 2-grams, 50 short answers produce thousands of columns: far more features than documents
+
+**TF-IDF** reweights counts: words frequent in this document but rare across documents get more weight.
+
+$$\text{tf-idf}(w, d) = \text{count}(w, d) \times \ln \frac{N}{\text{docs containing } w}$$
+:::
+
+::: discussion
+**Discussion.** Describe an n-gram in your own words. Why might it be useful?
+:::
+
+<span class="small muted">Notebook: §5; TF-IDF in the DuckDB companion</span>
+
+::: notes
+Allow 25 minutes for Part 3, including the notebook. Show the existing raw-word matrix, then stems and n-grams. Pause for the handout question on n-grams before moving to regression.
+:::
+
+## Logistic regression = a dictionary estimated from your labels {.smaller}
+
+::: {.fragment}
+$$
+P(\text{high warmth} \mid \text{text}) = \sigma\Big(\beta_0 + \sum_{j} \beta_j \, \text{count}_j\Big)
+$$
+:::
+
+::: {.fragment}
+- Each word gets a weight $\beta_j$, learned from the labeled examples
+- More columns than rows, so the model is **regularized**: weights are shrunk toward zero (scikit-learn's default L2 penalty)
+- `class_weight="balanced"` upweights the 9 warm answers in the training loss
+- Learned from our 50 answers: the top words toward warm are *you, thank you, thanks for*. Two of the three highest-rated answers are thank-yous, so the model learns politeness formulas as warmth
+:::
+
+::: {.analogy .fragment}
+**Marketing analogy:** a hand-made dictionary (LIWC, VADER) is a scale someone else wrote. Logistic regression on counts estimates the scale weights from your own coded data, the way you would estimate a choice model instead of assuming utilities.
+:::
+
+<span class="small muted">Notebook: §5</span>
+
+::: notes
+Use the regression knowledge students already have: a count is a covariate and its coefficient contributes to the linear predictor. Reveal the formula, then show the fitted word-weight table in §5. Class weighting changes the training loss; it does not guarantee good accuracy.
+:::
+
+## Cross-validation and the base rate {.smaller}
+
+:::: {.columns}
+::: {.column width="50%"}
+**5-fold cross-validation**: train on 40 answers, predict the held-out 10, then repeat across all five folds. Every answer gets an *out-of-fold* prediction from a model that did not train on it.
+
+| | Predicted high | Predicted low |
+|---|---|---|
+| Human high (9) | **2** | 7 |
+| Human low (41) | 1 | 40 |
+:::
+::: {.column width="50%"}
+- Cross-validated accuracy: **0.84** (SD 0.05 across folds)
+- Always predicting *low*: **0.82**
+- The model finds 2 of 9 warm answers
+- Error to read: *"brown, wheat based\-\-\- spirits."* predicted **warm**
+:::
+::::
+
+::: takeaway
+With 9 positives in 50, accuracy mostly reflects the base rate. Report recall on the rare class, and compare against the majority baseline, not against 0.5.
+:::
+
+<span class="small muted">Notebook: §5</span>
+
+# Part 4: Topic models
+
+## LDA: the story the model tells {.smaller}
+
+Latent Dirichlet allocation (LDA; Blei, Ng & Jordan 2003) assumes each document was written like this:
+
+::: {.fragment}
+1. Each **topic** $k$ has word probabilities $\phi_k$ (topic 1: *espresso, milk, barista ...*)
+2. Each **document** $d$ has topic shares $\theta_d$ (70% coffee, 30% software). The prior $\alpha$ controls how evenly documents mix topics.
+3. At word position $n$, $z_{dn}$ is the chosen topic and $w_{dn}$ is the observed word.
+:::
+
+::: {.fragment}
+$$\theta_d \sim \text{Dirichlet}(\alpha), \quad z_{dn} \sim \text{Cat}(\theta_d), \quad w_{dn} \sim \text{Cat}(\phi_{z_{dn}})$$
+
+<span class="small muted">$\text{Cat}(p)$ means choose one category using probabilities $p$.</span>
+:::
+
+::: {.fragment}
+Estimation runs the story backwards: which topics and mixes make the observed counts most likely?
+:::
+
+::: {.analogy .fragment}
+**Marketing analogy:** mixed-membership segmentation. Documents are consumers, words are purchases, topics are segments, and each consumer belongs partly to several segments.
+:::
+
+::: discussion
+**Discussion.** What is the intuition behind LDA? (Blei 2012)
+:::
+
+<span class="small muted">Notebook: §6</span>
+
+## LDA in practice: seeds, K, and junk words {.smaller}
+
+**Toy corpus** (2 coffee sentences, 2 software sentences, K = 2 topics):
+
+| seed | topic 0 | topic 1 |
+|---|---|---|
+| 0 | login, patch, bug, developers | espresso, steamed, milk, strong |
+| 1 | update, software, crashed, app, **rich** | login, pushed, patch, fix |
+
+The documents share no content words. Seed 0's semantic grouping is accidental; seed 1 splits software.
+
+**AMA corpus**, K = 2: topics mix loan advice, asphalt research, and URL fragments (*com, http, www*).
+Agreement of top-10 words across seeds (Jaccard similarity): 0.25 to 0.50.
+Without a stop list, both topics become *the, and, we, to, of, you ...*
+
+::: takeaway
+Report topic count, preprocessing, and stability across seeds. Read documents with high topic shares before naming topics.
+:::
+
+::: discussion
+**Discussion.** Should stop words be excluded before training LDA? Why or why not? Name a pitfall of LDA.
+:::
+
+<span class="small muted">Notebook: §6</span>
+
+::: notes
+Show §6 in order: topic-word probabilities, document-topic shares, the three seeds, then the model without stop words. The four toy documents have disjoint content vocabularies. Treat both seed outcomes as evidence of the toy corpus's weakness. Pause for the existing LDA questions.
+:::
+
+# Part 5: Vectors that carry meaning
+
+## BERT-style models: pretrain, then fine-tune {.smaller}
+
+::: flow
+[**Pretraining**<br>fill in masked words<br>in billions of words]{.box} [→]{.arrow} [**Fine-tuning**<br>add a classifier head,<br>train on labeled sentences]{.box} [→]{.arrow} [**Prediction**<br>label + softmax<br>confidence]{.box}
+:::
+
+- **BERT** (Devlin et al. 2019) learns language by filling in masked words
+- **DistilBERT** (Sanh et al. 2019): a smaller student model trained to mimic BERT, about 40% smaller
+- Our sentiment model was fine-tuned on **SST-2**, the Stanford Sentiment Treebank of movie-review sentences
+
+| text | label | confidence |
+|---|---|---|
+| The delivery was late and disappointing. | NEGATIVE | 1.00 |
+| Great, another outage! | **POSITIVE** | 0.998 |
+
+The model reads word pieces (*outage* → *out* + *##age*). On the 100 AMA answers its median confidence is 0.996.
+
+::: takeaway
+The score is the model's confidence in its label, not sentiment intensity. The labels describe movie-review polarity, which differs from warmth toward the questioner.
+:::
+
+<span class="small muted">Notebook: §7</span>
+
+## Two sentiment instruments, one corpus {.smaller}
+
+VADER (cut at ±0.5) against DistilBERT (SST-2) on the 100 AMA answers:
+
+| | DistilBERT NEGATIVE | DistilBERT POSITIVE | total |
+|---|---|---|---|
+| VADER negative | 5 | 0 | 5 |
+| VADER neutral | 21 | 17 | 38 |
+| VADER positive | **26** | 31 | 57 |
+
+- They agree on the clearly negative answers
+- 26 answers VADER calls positive, DistilBERT calls NEGATIVE, often with confidence 0.999
+- Example: *"Hellos! Thanks for your interest and questions. Outernet is a broadcast data service..."*: VADER 0.73, DistilBERT NEGATIVE 0.999
+
+::: takeaway
+The tools assign opposite polarities to 26 answers; another 38 are neutral only under VADER. Check both against human judgments.
+:::
+
+<span class="small muted">Notebook: §7</span>
+
+## Why counts are not enough {.smaller}
+
+Cosine similarity between the four toy sentences:
+
+| | bag of words | sentence embedding |
+|---|---|---|
+| espresso sentence vs barista sentence | **0.00** | **0.48** |
+| app sentence vs developers sentence | 0.00 | 0.36 |
+| espresso sentence vs app sentence | 0.00 | 0.10 |
+
+The coffee sentences share no words, so their count vectors have zero cosine similarity. Their sentence embeddings are closer together.
+
+$$\cos(u, v) = \frac{u \cdot v}{\lVert u \rVert\, \lVert v \rVert}$$
+
+<span class="small muted">Notebook: §7b</span>
+
+## Word embeddings: you know a word by its neighbors {.smaller}
+
+**Static embeddings** (word2vec idea, Mikolov et al. 2013): train a vector for each word so that it predicts the words around it. Words used in similar contexts end up close.
+
+| loan | customer | price |
+|---|---|---|
+| loans 0.80 | customers 0.80 | prices 0.78 |
+| lending 0.59 | consumer 0.48 | pricing 0.64 |
+| borrow 0.55 | client 0.43 | cost 0.54 |
+| mortgage 0.51 | user 0.37 | fee 0.42 |
+
+<span class="small muted">Nearest neighbors in MiniLM's input embedding table, standing in for word2vec.</span>
+
+::: analogy
+**Marketing analogy:** a perceptual map with 384 dimensions, where positions come from how words are used rather than from survey ratings.
+:::
+
+<span class="small muted">Notebook: §7b</span>
+
+## Contextual embeddings: one word, many meanings {.smaller}
+
+A static vector gives *interest* one position. A transformer gives it a different vector in every sentence.
+
+| *interest* in ... | loan rate | savings | lecture | astronomy |
+|---|---|---|---|---|
+| loan rate | 1.00 | **0.84** | 0.46 | 0.38 |
+| lecture | 0.46 | 0.61 | 1.00 | **0.87** |
+
+::: {.fragment}
+**How a transformer does it** (Vaswani et al. 2017): each layer updates every token's vector by mixing in the vectors of the other tokens, weighted by relevance (**attention**). After several layers, *interest* next to *loan* and *rate* carries financial meaning.
+
+$$\text{Attention}(Q,K,V) = \text{softmax}\!\left(\frac{QK^\top}{\sqrt{d}}\right) V$$
+
+| symbol | intuition |
+|---|---|
+| $Q$ (query) | what the current token is looking for |
+| $K$ (key) | what each candidate token can be matched on |
+| $V$ (value) | information from matched tokens mixed into the current token's updated vector |
+
+<span class="small muted">$QK^\top$ scores how well each query matches each key. $d$ is the key width. Dividing by $\sqrt{d}$ keeps large vectors from producing extreme scores.</span>
+:::
+
+<span class="small muted">Notebook: §7b</span>
+
+## Sentence embeddings as features {.smaller}
+
+**MiniLM** (Sentence-BERT approach, Reimers & Gurevych 2019): a small transformer trained so that paraphrases and matching question–answer pairs get nearby vectors. Averaging the token vectors gives one 384-number vector per answer.
+
+We keep the labels, folds, and classifier from notebook §5. MiniLM's 256-token limit cuts 6 of 100 answers:
+
+| features | CV accuracy | warm answers found | false warm |
+|---|---|---|---|
+| always "low" | 0.82 | 0 of 9 | 0 |
+| bag of words (1–2-grams) | 0.84 | 2 of 9 | 1 |
+| MiniLM embeddings | **0.92** (SD 0.07) | **5 of 9** | 0 |
+
+::: takeaway
+Accuracy rises from 0.84 to 0.92: four fewer errors on 50 answers. Fold standard deviations alone do not tell us how uncertain that difference is.
+:::
+
+<span class="small muted">Notebook: §7b</span>
+
+::: notes
+The local tokenizer check found six inputs above 256 tokens, with a maximum of 362. DistilBERT's 512-token limit cuts none. Keep the existing results and explain the different input limits. The four-error difference is descriptive; fold standard deviations are not a test of that difference.
+:::
+
+## Embeddings for clustering and search {.smaller}
+
+:::: {.columns}
+::: {.column width="50%"}
+**Clustering (BERTopic idea, Grootendorst 2022)**
+
+1. Embed every answer
+2. Group the vectors (k-means, 2 clusters)
+3. Describe each cluster by words frequent in it and rare elsewhere (class-based TF-IDF)
+
+The two clusters average 526 and 270 characters: they partly sort answers by length.
+:::
+::: {.column width="50%"}
+**Retrieval:** embed a query, rank answers by cosine
+
+| query | best cosine |
+|---|---|
+| What should I do about my student loans? | 0.62 |
+| How do you deal with unhappy customers? | 0.36 |
+
+No answer is about complaints, but the search still returns a match with a low score.
+:::
+::::
+
+**Same form, opposite meaning:** *"yes"* and *"No"* have embedding cosine 0.73 and bag-of-words cosine 0.00.
+
+::: takeaway
+Search returns the nearest answers even when none is relevant. Read the returned texts.
+:::
+
+<span class="small muted">Optional extension · Notebook: optional 7c</span>
+
+# Part 6: Zero-shot classification
+
+## Natural language inference as a classifier {.smaller}
+
+**Natural language inference (NLI):** given a *premise* and a *hypothesis*, does the premise entail it, contradict it, or neither? Models are fine-tuned on MNLI (Multi-Genre NLI), about 400,000 human-labeled pairs.
+
+For **zero-shot classification** (Yin, Hay & Roth 2019), write each class as a hypothesis.
+
+```text
+premise:     <the AMA answer>
+hypothesis:  "This response is warm and friendly toward the questioner."
+hypothesis:  "This response is neutral and factual."
+```
+
+Apply softmax to the **entailment logits** across candidate hypotheses. The scores sum to 1. No task-specific training labels are needed.
+
+::: analogy
+**Marketing analogy:** the hypothesis template is a survey item. Change the wording and you change the measure.
+:::
+
+<span class="small muted">Notebook: §7d</span>
+
+## Zero-shot warmth: good ranking, poor cut-off {.smaller}
+
+Two wordings of the same construct, scored on the 50 development answers:
+
+| template | AUC | accuracy at 0.5 | share called warm at 0.5 | accuracy at base-rate cut |
+|---|---|---|---|---|
+| "This response is {}." | 0.72 | 0.52 | 0.54 | 0.84 |
+| "The tone of this reply is {}." | 0.84 | 0.54 | 0.64 | 0.84 |
+
+<span class="small">AUC: probability that a random warm answer scores above a random cold one (0.5 = chance). Base-rate cut: call the top 18% warm, matching the 9 of 50 human rate.</span>
+
+- At 0.5 the model calls more than half the answers warm and falls below the 0.82 majority baseline
+- The two templates agree on 82% of answers; the second ranks better
+- Puffery, the construct in Thomas (2026): the factual *"Two bedrooms, 65 square metres, third floor"* scores 0.56 puffery
+
+::: takeaway
+The base-rate cutoff and template comparison use development labels. Final evaluation needs texts you did not use for these choices.
+:::
+
+<span class="small muted">Notebook: §7d</span>
+
+# Part 7: Generative language models
+
+## A language model predicts the next token {.smaller}
+
+$$P(w_1, \dots, w_T) = \prod_{t} P(w_t \mid w_1, \dots, w_{t-1})$$
+
+**Tokens are word pieces:** *"Lorem ipsum"* → `L` `orem` `ip` `sum`. Vocabulary: 32,768 pieces.
+
+Prompt: *"The customer service team was"* → one score (logit) per vocabulary piece → softmax → probabilities:
+
+::: {.fragment}
+| next token | probability |
+|---|---|
+| overwhel(med) | 0.086 |
+| not | 0.053 |
+| able | 0.034 |
+:::
+
+::: {.fragment}
+- **Greedy decoding:** always take the top token → *"...was overwhelmed by the number of requests and the complexity of the issue."*
+- **Sampling:** draw from the distribution → three seeds, three continuations (*extremely helpful*, *excellent*, *excellent to work with*)
+:::
+
+<span class="small muted">Notebook: §8</span>
+
+::: notes
+Show §8 in order: input IDs and tokens, logits shape, top-three next-token probabilities, then the first steps of the manual greedy loop. Compare with generate(), then the three sampled continuations. `generate()` runs the decoding loop for us.
+:::
+
+## Base model vs. instruct model {.smaller}
+
+:::: {.columns}
+::: {.column width="50%"}
+**Base model:** pretrained to continue text. Ask it a question and it may write more questions.
+
+**Instruct model:** the same network fine-tuned on conversations, so it answers. Conversations are rendered with a **chat template**:
+
+```text
+<|im_start|>system
+You classify the sentiment as
+*positive*,
+*neutral*,
+or *negative*.<|im_end|>
+<|im_start|>user
+TEXT: 'UNSW is in Sydney.'
+*<|im_end|>
+<|im_start|>assistant
+```
+:::
+::: {.column width="50%"}
+Falcon-H1 Tiny, 90 million parameters, greedy, 3 new tokens:
+
+| text | answer |
+|---|---|
+| I love it | positive |
+| This is the worst! | negative |
+| UNSW is amazing! | positive |
+| UNSW is in Sydney. | neutral |
+:::
+::::
+
+<span class="small muted">Notebook: §8</span>
+
+## Classifying with an LLM without parsing text {.smaller}
+
+1. **Codebook**: what counts as warm or cold in descriptions of customer care
+2. **Few-shot examples**: 8 invented, labeled sentences as earlier conversation turns
+3. Read the logits for the tokens *warm* and *cold* at the answer position:
+
+::: {.fragment}
+$$\text{score} = \text{logit}(\text{warm}) - \text{logit}(\text{cold}) = \log \frac{P(\text{warm})}{P(\text{cold})}$$
+:::
+
+::: {.fragment}
+| text | score |
+|---|---|
+| The agent apologised, waived the fee, and followed up the next morning. | +4.07 |
+| Your ticket has been closed. | **+0.33 → warm**; −0.10 after the edit below |
+
+On the development answers, the model finds 8 of 9 warm answers but also calls 26 of 41 cold answers warm. Accuracy 0.46 vs. baseline 0.82; AUC 0.80.
+:::
+
+::: {.takeaway .fragment}
+`fact. Label` → `factLabel` removes a period and a space. The codebook describes customer care; the human ratings concern warmth toward the questioner. We cannot attribute all errors to the model.
+:::
+
+::: notes
+Show the codebook and rendered prompt before the scores. It describes customer care, whereas the human task is warmth toward the questioner. In the perturbation cell, point to both deleted characters: a period and a space. The printed labels mention only the period.
+
+The separate R exercise (`evaluate_agreement.R`) computes agreement between LLM and human coders.
+:::
+
+<span class="small muted">Notebook: §8</span>
+
+## Validating LLM outputs {.smaller}
+
+::: discussion
+**Discussion.** How does Thomas (2026, Table 5) validate the LLM-based "puffery likelihood"? Why must we validate LLM outputs? What other strategies can you think of? Should stop words be removed before an LLM reads a text?
+:::
+
+Checks from today's notebook:
+
+| Check | What we saw |
+|---|---|
+| Compare with human labels on the same texts (§8, §9) | 8 of 9 warm answers found, but 26 of 41 cold answers called warm |
+| Separate ranking from cut-off | AUC 0.80, accuracy 0.46 |
+| Change punctuation and spacing (§8) | `fact. Label` → `factLabel` flips a label |
+| Change the wording (§7d) | Two zero-shot templates agree on 82% of answers |
+| Remove stop words (§8) | *"The agent did not help me at all."* → *"agent help"*: DistilBERT NEGATIVE 0.99 → POSITIVE 0.91; LLM warmth +0.12 → +3.09 |
+
+<span class="small muted">Notebook: §8, §9</span>
+
+::: notes
+Pause for the handout questions before discussing the answer. Thomas (2026), Table 5, gives example claim ratings. The surrounding “Quantifying Language Use” text checks their consistency with legal cases, identifies exceptions, and reports robustness to different cutoffs and a bag-of-words measure classified by human researchers. Distinguish these checks from a held-out accuracy assessment. Source: https://journals.sagepub.com/doi/10.1177/00222437261444259 (accessed 6 October 2026).
+:::
+
+## Encoder–decoder models: summarization {.smaller}
+
+**T5 / Flan-T5** (Raffel et al. 2020; Chung et al. 2022): an **encoder** reads the whole input once; a **decoder** writes the output token by token while looking back at the encoded input. The task is named in the input: `summarize: <text>`.
+
+**Beam search** (`num_beams=4`): keep the 4 best partial outputs at each step instead of only the single best token.
+
+On the five longest development answers (Flan-T5 small):
+
+- Most "summaries" copy the opening sentences of the answer
+- One repeats *"I've been working in the aerospace industry for a long time."* four times
+- Word check: in one summary only 60% of content words occur in the source (*long*, *time* do not)
+
+::: takeaway
+Check summaries against the source: a fluent summary can still copy, repeat, or invent content.
+:::
+
+<span class="small muted">Optional extension · Notebook: appendix C</span>
+
+# Part 8: Images and text in one space
+
+Optional extension
+
+## CLIP: matching photos and captions {.smaller}
+
+**CLIP** (Contrastive Language–Image Pretraining; Radford et al. 2021): an image encoder and a text encoder, trained on 400 million image–caption pairs so that each photo lands next to its own caption and away from the others.
+
+**Zero-shot = nearest prompt:** compare the photo with *"a photo of a bedroom"*, *"a photo of a kitchen"*, ...
+
+Airbnb is also the setting of Thomas (2026), where adding puffed claims to listing descriptions raises bookings. The notebook uses 24 Sydney listings, 6 per room type.
+
+| task | result | chance |
+|---|---|---|
+| room type from the cover photo | 0.54 | 0.25 |
+| own description ranked first among 24 | 0.17 | 0.04 |
+
+- 4 of 6 *shared rooms* lead with a street or building photo: the label is a booking category, not something visible
+- *"a swimming pool"* still returns three photos (no listing has a pool); top cosine 0.22 vs. 0.30 for *"a modern kitchen"*
+
+<span class="small muted">Optional extension · Notebook: CLIP companion notebook</span>
+
+# Wrap-up
+
+## The warmth task across methods {.smaller}
+
+All on the 50 development answers, 9 of them high warmth.
+
+| method | labels used | accuracy | warm found (of 9) | false warm (of 41) |
+|---|---|---|---|---|
+| always "low" | none | 0.82 | 0 | 0 |
+| bag of words + logistic regression | 50 (CV) | 0.84 | 2 | 1 |
+| MiniLM embeddings + logistic regression | 50 (CV) | **0.92** | 5 | 0 |
+| zero-shot NLI ("tone" template), cut at 0.5 | none | 0.54 | 9 | 23 |
+| zero-shot NLI ("tone" template), cut at base rate | base rate only | 0.84 | 5 | 4 |
+| 90M LLM, few-shot, cut at 0 | 8 invented examples | 0.46 | 8 | 26 |
+
+<span class="small muted">Only CV rows are out-of-fold. The base-rate cutoff uses development labels; the LLM uses a different codebook. Source: output/09_warmth_comparison.csv.</span>
+
+<span class="small muted">Notebook: §9</span>
+
+::: notes
+Allow the final 10 minutes for this table and method choice. Read warm found and false warm before accuracy. Only the two logistic-regression rows are out-of-fold. The base-rate cutoff uses the development labels. Keep the 50 hidden-label answers for final evaluation after model, wording and cutoff choices.
+:::
+
+## Choosing a method {.smaller}
+
+| You have... | Start with |
+|---|---|
+| a construct someone already built a dictionary for | the lexicon, validated on a coded sample |
+| a few hundred coded texts | embeddings + logistic regression; bag of words as the transparent benchmark |
+| no labels, need to explore | embeddings + clustering or LDA, with stability checks |
+| no labels, a clear construct | zero-shot or an LLM, then code a sample to set the threshold and check agreement |
+| need to explain the measure to a reviewer | rules, lexicons, bag of words: you can list what fired |
+
+::: takeaway
+Every method needs the same validation step: compare to human judgment on a sample you did not tune on, and read the errors.
+:::
+
+## References {.smaller}
+
+:::: {.columns}
+::: {.column width="50%"}
+::: small
+- Berger, J., Humphreys, A., Ludwig, S., Moe, W. W., Netzer, O., & Schweidel, D. A. (2020). Uniting the tribes: Using text for marketing insight. *Journal of Marketing*, 84(1), 1–25.
+- Blei, D. M. (2012). Probabilistic topic models. *Communications of the ACM*, 55(4), 77–84.
+- Blei, D. M., Ng, A. Y., & Jordan, M. I. (2003). Latent Dirichlet allocation. *JMLR*.
+- Chung, H. W., et al. (2022). Scaling instruction-finetuned language models. *arXiv*.
+- Devlin, J., Chang, M.-W., Lee, K., & Toutanova, K. (2019). BERT. *NAACL*.
+- Grootendorst, M. (2022). BERTopic. *arXiv*.
+- Hartmann, J., & Netzer, O. (2023). Natural language processing in marketing. In K. Sudhir & O. Toubia (Eds.), *Artificial Intelligence in Marketing*.
+- Hutto, C. J., & Gilbert, E. (2014). VADER. *ICWSM*.
+- Kim, E., Ding, M., Wang, X., & Lu, S. (2023). Does topic consistency matter? A study of critic and user reviews in the movie industry. *Journal of Marketing*, 87(3), 428–450.
+- Mikolov, T., et al. (2013). Distributed representations of words and phrases. *NeurIPS*.
+:::
+:::
+::: {.column width="50%"}
+::: small
+- Miller, G. A. (1995). WordNet: A lexical database for English. *Communications of the ACM*.
+- Netzer, O., Feldman, R., Goldenberg, J., & Fresko, M. (2012). Mine your own business. *Marketing Science*.
+- Porter, M. F. (1980). An algorithm for suffix stripping. *Program*.
+- Radford, A., et al. (2021). Learning transferable visual models from natural language supervision. *ICML*.
+- Raffel, C., et al. (2020). Exploring the limits of transfer learning with a unified text-to-text transformer. *JMLR*.
+- Reimers, N., & Gurevych, I. (2019). Sentence-BERT. *EMNLP*.
+- Sanh, V., Debut, L., Chaumond, J., & Wolf, T. (2019). DistilBERT. *arXiv*.
+- Thomas, M. (2026). Does puffery sell? Evidence from Airbnb. *Journal of Marketing Research*. doi:10.1177/00222437261444259
+- Vaswani, A., et al. (2017). Attention is all you need. *NeurIPS*.
+- Yin, W., Hay, J., & Roth, D. (2019). Benchmarking zero-shot text classification. *EMNLP*.
+:::
+:::
+::::
